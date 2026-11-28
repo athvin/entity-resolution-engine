@@ -5468,7 +5468,151 @@ export interface components {
             writeback_allowlist: unknown;
         };
     };
-    responses: never;
+    responses: {
+        /** @description The request is malformed. */
+        Error400: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+        /** @description No valid credential. */
+        Error401: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+        /** @description The org's record allowance is used up. */
+        Error402: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+        /** @description The credential's role is below what this operation needs. */
+        Error403: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+        /** @description Not found — including another org's resource, which is never distinguished from a missing one. */
+        Error404: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+        /** @description The request conflicts with the resource's current state. */
+        Error409: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+        /** @description Gone. */
+        Error410: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+        /** @description The body is larger than this operation accepts. */
+        Error413: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+        /** @description The request is well-formed but invalid; `detail` says which field and why. */
+        Error422: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+        /** @description Internal error. */
+        Error500: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+        /** @description Not available on this deployment (a store it needs is not configured). */
+        Error501: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+        /** @description An upstream provider failed. */
+        Error502: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+        /** @description Temporarily unavailable, or not configured on this deployment. */
+        Error503: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    detail: string;
+                };
+            };
+        };
+    };
     parameters: never;
     requestBodies: never;
     headers: never;
@@ -5518,6 +5662,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            503: components["responses"]["Error503"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -5570,6 +5715,10 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -5612,6 +5761,11 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            422: components["responses"]["Error422"];
+            502: components["responses"]["Error502"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -5645,6 +5799,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -5694,6 +5853,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -5734,6 +5899,11 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -5781,6 +5951,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -5826,6 +6002,11 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -5864,6 +6045,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -5895,6 +6081,10 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -5939,6 +6129,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -5972,6 +6168,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6011,6 +6212,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6044,6 +6251,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6083,6 +6295,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6117,6 +6335,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6165,6 +6388,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6198,6 +6426,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6242,6 +6475,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -6283,6 +6523,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6317,6 +6562,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -6358,6 +6608,14 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6392,6 +6650,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -6433,6 +6696,14 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            502: components["responses"]["Error502"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -6466,6 +6737,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6514,6 +6790,14 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6548,6 +6832,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6588,6 +6877,11 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6629,6 +6923,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -6676,6 +6977,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6710,6 +7018,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6745,6 +7059,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6782,6 +7102,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6816,6 +7142,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6856,6 +7187,11 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6890,6 +7226,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6930,6 +7271,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -6965,6 +7312,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7000,6 +7352,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7037,6 +7397,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7098,6 +7464,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            410: components["responses"]["Error410"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7133,6 +7507,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7176,6 +7555,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7211,6 +7596,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7253,6 +7643,14 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            410: components["responses"]["Error410"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -7292,6 +7690,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -7338,6 +7741,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            410: components["responses"]["Error410"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response: the export's artifact as an attachment, CSV, JSON Lines or Parquet as the export's `format` says. */
             "2XX": {
                 headers: {
@@ -7378,6 +7789,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -7423,6 +7841,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            410: components["responses"]["Error410"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response: an Arrow IPC stream (a schema message, then record batches). Each row is one of the components named in `x-er-arrow-rows`, column for column, decided by the dataset's entity type. An empty page still carries the schema. */
             "2XX": {
                 headers: {
@@ -7464,6 +7890,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7506,6 +7938,14 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7540,6 +7980,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -7585,6 +8030,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -7629,6 +8081,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -7662,7 +8121,10 @@ export interface operations {
                 /** @description `upsert` (the default and only mode): rows add or replace by record key; nothing the file omits is deleted. */
                 mode?: string;
             };
-            header?: never;
+            header?: {
+                /** @description Make the request safely retryable: the same key with the same payload returns the original receipt (with `Idempotent-Replayed: true`) and queues nothing; the same key with a different payload is a 409. Scoped to the dataset and source; at most 255 characters. */
+                "Idempotency-Key"?: string;
+            };
             path: {
                 org: string;
                 ds: string;
@@ -7678,9 +8140,21 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            402: components["responses"]["Error402"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            413: components["responses"]["Error413"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
+                    /** @description `true` when this response replays the receipt of an earlier request with the same Idempotency-Key; absent on a first delivery. */
+                    "Idempotent-Replayed"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -7717,6 +8191,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7754,6 +8234,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7791,6 +8278,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7830,6 +8323,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7872,6 +8370,13 @@ export interface operations {
             };
         };
         responses: {
+            400: components["responses"]["Error400"];
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7907,6 +8412,10 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7942,6 +8451,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -7977,6 +8491,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8012,6 +8532,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8055,6 +8580,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8096,6 +8627,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8137,6 +8675,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8182,6 +8725,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8223,6 +8772,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8257,6 +8811,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8302,6 +8862,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8336,6 +8902,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8379,6 +8950,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8425,6 +9003,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8462,6 +9047,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8505,6 +9096,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8548,6 +9146,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8589,6 +9194,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8623,6 +9233,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8668,6 +9284,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8702,6 +9325,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8737,6 +9366,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8779,6 +9413,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8821,6 +9461,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8856,6 +9502,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -8891,6 +9542,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -8939,6 +9596,14 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -8973,6 +9638,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9007,6 +9678,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -9044,6 +9720,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9088,6 +9770,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9124,6 +9812,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9160,6 +9853,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -9204,6 +9904,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9245,6 +9951,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9283,6 +9996,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -9322,6 +10042,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9356,6 +10083,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9398,6 +10131,14 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9423,7 +10164,10 @@ export interface operations {
     post_orgs_by_org_datasets_by_ds_records_ingest: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Make the request safely retryable: the same key with the same payload returns the original receipt (with `Idempotent-Replayed: true`) and queues nothing; the same key with a different payload is a 409. Scoped to the dataset and source; at most 255 characters. */
+                "Idempotency-Key"?: string;
+            };
             path: {
                 org: string;
                 ds: string;
@@ -9440,9 +10184,21 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            402: components["responses"]["Error402"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            413: components["responses"]["Error413"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
+                    /** @description `true` when this response replays the receipt of an earlier request with the same Idempotency-Key; absent on a first delivery. */
+                    "Idempotent-Replayed"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -9482,6 +10238,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9524,6 +10287,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9566,6 +10336,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9607,6 +10384,14 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9649,6 +10434,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9691,6 +10483,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9734,6 +10533,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9777,6 +10583,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9819,6 +10632,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9853,6 +10673,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -9903,6 +10729,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9947,6 +10780,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -9982,6 +10822,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10017,6 +10863,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10058,6 +10911,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10092,6 +10952,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10134,6 +11000,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10168,6 +11041,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -10206,6 +11084,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10248,6 +11131,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10283,6 +11172,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10324,6 +11218,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10358,6 +11258,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -10394,6 +11299,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10428,6 +11338,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -10468,6 +11384,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10510,6 +11432,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10550,6 +11478,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10592,6 +11526,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10634,6 +11574,16 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            402: components["responses"]["Error402"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            410: components["responses"]["Error410"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -10669,6 +11619,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            410: components["responses"]["Error410"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -10704,6 +11662,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            410: components["responses"]["Error410"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10739,9 +11705,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            410: components["responses"]["Error410"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
+                    /** @description `true` when this response replays the receipt of an earlier request with the same Idempotency-Key; absent on a first delivery. */
+                    "Idempotent-Replayed"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10779,6 +11756,15 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            410: components["responses"]["Error410"];
+            413: components["responses"]["Error413"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10820,6 +11806,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10854,6 +11845,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10899,6 +11896,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10933,6 +11936,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -10977,6 +11985,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11011,6 +12025,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11057,6 +12076,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11091,6 +12116,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11138,6 +12168,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11178,6 +12214,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11211,6 +12253,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -11247,6 +12295,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -11288,6 +12342,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11329,6 +12389,13 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            409: components["responses"]["Error409"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11363,6 +12430,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11396,6 +12469,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
+            503: components["responses"]["Error503"];
             /** @description Successful response. Payload types are described only at envelope granularity. */
             "2XX": {
                 headers: {
@@ -11429,6 +12508,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11470,6 +12554,12 @@ export interface operations {
             };
         };
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11507,6 +12597,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            422: components["responses"]["Error422"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11540,6 +12636,9 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
             /** @description Successful response. */
             "2XX": {
                 headers: {
@@ -11574,6 +12673,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            401: components["responses"]["Error401"];
+            403: components["responses"]["Error403"];
+            404: components["responses"]["Error404"];
+            500: components["responses"]["Error500"];
+            501: components["responses"]["Error501"];
             /** @description Successful response. */
             "2XX": {
                 headers: {

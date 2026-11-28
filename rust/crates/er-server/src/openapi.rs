@@ -266,6 +266,34 @@ fn add_operations(doc: &mut utoipa::openapi::OpenApi, audience: Audience) {
         &schemas,
     )
     .unwrap_or_else(|e| panic!("derive OpenAPI operations: {e}"));
+    // One shared response per error status (#1333), referenced by every
+    // operation that can answer it, so the contract states each once.
+    {
+        use utoipa::openapi::response::ResponseBuilder;
+        let statuses: std::collections::BTreeSet<u16> = operations
+            .iter()
+            .flat_map(|o| o.surface.statuses.iter().copied())
+            .collect();
+        let components = doc.components.as_mut().expect("registered entity schemas");
+        for status in statuses {
+            components.responses.insert(
+                format!("Error{status}"),
+                utoipa::openapi::RefOr::T(
+                    ResponseBuilder::new()
+                        .description(er_api_spec::status_reason(status))
+                        .content(
+                            "application/json",
+                            json_content(serde_json::json!({
+                                "type": "object",
+                                "properties": {"detail": {"type": "string"}},
+                                "required": ["detail"],
+                            })),
+                        )
+                        .build(),
+                ),
+            );
+        }
+    }
     let mut paths = PathsBuilder::new();
     for derived in operations {
         if audience == Audience::Public
@@ -291,7 +319,21 @@ fn add_operations(doc: &mut utoipa::openapi::OpenApi, audience: Audience) {
                 &derived.responses,
                 &derived.response_schemas,
                 arrow_rows(&derived.method, &derived.path),
+                &derived.surface,
             ));
+        for header in &derived.surface.request_headers {
+            operation = operation.parameter(
+                ParameterBuilder::new()
+                    .name(*header)
+                    .parameter_in(ParameterIn::Header)
+                    .required(Required::False)
+                    .description(Some(header_doc(header)))
+                    .schema(Some(json_schema(
+                        serde_json::json!({"type": "string", "maxLength": 255}),
+                    )))
+                    .build(),
+            );
+        }
         for param in derived.params {
             operation = operation.parameter(
                 ParameterBuilder::new()
@@ -416,10 +458,21 @@ fn arrow_rows(method: &str, path: &str) -> &'static [&'static str] {
         .map_or(&[], |(_, _, rows)| rows)
 }
 
+/// What a request or response header means, for the headers the contract
+/// derives (er-api-spec's `errors::REQUEST_HEADERS` / `RESPONSE_HEADERS`).
+fn header_doc(name: &str) -> String {
+    match name {
+        "Idempotency-Key" => "Make the request safely retryable: the same key with the same payload returns the original receipt (with `Idempotent-Replayed: true`) and queues nothing; the same key with a different payload is a 409. Scoped to the dataset and source; at most 255 characters.".to_string(),
+        "Idempotent-Replayed" => "`true` when this response replays the receipt of an earlier request with the same Idempotency-Key; absent on a first delivery.".to_string(),
+        other => format!("The {other} header."),
+    }
+}
+
 fn operation_responses(
     envelopes: &[er_api_spec::Envelope],
     typed: &[serde_json::Value],
     arrow_rows: &[&str],
+    surface: &er_api_spec::Surface,
 ) -> utoipa::openapi::response::Responses {
     use er_api_spec::Envelope;
     use serde_json::json;
@@ -521,7 +574,26 @@ fn operation_responses(
         };
         response = response.content("application/json", json_content(schema));
     }
-    ResponsesBuilder::new().response("2XX", response.build())
+    for header in &surface.response_headers {
+        response = response.header(
+            *header,
+            utoipa::openapi::header::HeaderBuilder::new()
+                .schema(Some(json_schema(json!({"type": "string"}))))
+                .description(Some(header_doc(header)))
+                .build(),
+        );
+    }
+    let mut responses = ResponsesBuilder::new().response("2XX", response.build());
+    // Each error status the handler (or a local helper it calls) can answer,
+    // derived from its source (#1333): a reference to the shared
+    // `components.responses.Error{status}`, whose body is `{detail}`.
+    for status in &surface.statuses {
+        responses = responses.response(
+            status.to_string(),
+            utoipa::openapi::Ref::from_response_name(format!("Error{status}")),
+        );
+    }
+    responses
         .response("default", ResponseBuilder::new()
             .description("Application error. Request-extractor or infrastructure rejections may use a different body.")
             .content("application/json", json_content(json!({"type":"object", "properties":{"detail":{"type":"string"}}, "required":["detail"]})))
@@ -927,6 +999,41 @@ mod tests {
                 {"$ref": "#/components/schemas/DatasetProvisioning"},
                 {"$ref": "#/components/schemas/DatasetCreated"},
             ]})
+        );
+    }
+
+    #[test]
+    fn the_delivery_contract_declares_its_headers_and_error_statuses() {
+        // #1333: a client generated from the contract must see the retry
+        // header, the replay marker and the statuses the handler answers.
+        let doc: serde_json::Value = serde_json::from_str(&openapi_json(Audience::Public)).unwrap();
+        let ingest = &doc["paths"]["/v1/orgs/{org}/datasets/{ds}/records/ingest"]["post"];
+        let headers: Vec<&str> = ingest["parameters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["in"] == "header")
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(headers, ["Idempotency-Key"]);
+        assert!(
+            ingest["responses"]["2XX"]["headers"]
+                .get("Idempotent-Replayed")
+                .is_some()
+        );
+        for status in ["401", "402", "403", "404", "409", "413", "422"] {
+            let reference = ingest["responses"][status]["$ref"].as_str().unwrap();
+            let name = reference.rsplit('/').next().unwrap();
+            let shared = &doc["components"]["responses"][name];
+            assert_eq!(
+                shared["content"]["application/json"]["schema"]["required"][0], "detail",
+                "{status} carries the detail body"
+            );
+        }
+        let health = &doc["paths"]["/healthz"]["get"]["responses"];
+        assert!(
+            health.get("401").is_none(),
+            "an unauthenticated probe has no 401"
         );
     }
 

@@ -24,6 +24,16 @@ invalid configuration (`pg_dataset_config`), duplicate and conflicting
 deliveries (`pg_delivery_replay`), interrupted bulk transfer (`pg_bulk_upload`),
 export scoping (`pg_exports`).
 
+
+**What a generated client sees (#1333).** Every operation's error statuses
+are in the contract, each with the `{detail}` body. So are the headers it
+reads or sets: `Idempotency-Key` on `records/ingest` and `imports`, and
+`Idempotent-Replayed` on their success. Both are derived from the handler
+source in `er-api-spec` (`operations/errors.rs`), following local helpers
+such as `guard` and `idempotency_key`, so a status a handler gains reaches the
+contract with no hand-kept list. A handler taking `Principal` declares 401.
+The derivation over-approximates: a helper's every status counts.
+
 ## Supported boundaries
 
 - **Entity types:** `person` and `account`, fixed per dataset, through the
