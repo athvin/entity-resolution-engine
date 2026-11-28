@@ -37,6 +37,7 @@ mod fake_pod_api;
 mod http;
 mod immutable_deliveries;
 mod mcp_manifest;
+mod merge_plans_events;
 mod mock_contract;
 mod multicall;
 mod no_second_executor;
