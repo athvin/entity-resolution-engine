@@ -4021,6 +4021,25 @@ impl Drop for ExecutionScope {
     }
 }
 
+/// Record one DAG pod task's statement executions under `stage` (#1330).
+///
+/// The composed pipeline records through [`observed`]; a DAG pod runs ONE stage
+/// function directly and never passed through it, so the per-attempt cost the
+/// roll-up bills (`run_costs`) had no statements to share across. Same recorder,
+/// same best-effort contract: a recording failure is logged, never the task's.
+/// Only for a task that already writes the lake, because the drain is a lake write.
+pub fn with_recorded_executions<T>(
+    session: &Session,
+    run_id: &str,
+    stage: &str,
+    f: impl FnOnce() -> T,
+) -> T {
+    let _scope = ExecutionScope::new(run_id);
+    let out = f();
+    drain_executions(session, stage);
+    out
+}
+
 /// Write one stage's buffered executions to the lake.
 ///
 /// Best effort throughout, per `reporter.rs`'s contract that observation must

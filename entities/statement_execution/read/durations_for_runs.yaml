@@ -1,0 +1,12 @@
+kind: statement
+operation: read
+description: "Each statement's total duration and execution count per (run, stage), for the given runs (ids joined by chr(31)) at a pinned snapshot: what the cost roll-up shares an attempt's spend across (#1330)."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: run_ids, type: varchar }
+returns:
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: stage, type: varchar, nullable: false }
+  - { name: statement, type: varchar, nullable: false }
+  - { name: total_ms, type: bigint, nullable: false }
+  - { name: executions, type: bigint, nullable: false }

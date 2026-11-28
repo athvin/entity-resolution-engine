@@ -146,3 +146,93 @@ pub fn append_rows(conn: &::duckdb::Connection, rows: &[AppendRow]) -> ::duckdb:
     drop(__entered);
     Ok(rows.len())
 }
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `durations_for_runs`: Each statement's total duration and execution count per (run, stage), for the given runs (ids joined by chr(31)) at a pinned snapshot: what the cost roll-up shares an attempt's spend across (#1330).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct DurationsForRunsRow {
+        pub run_id: String,
+        pub stage: String,
+        pub statement: String,
+        pub total_ms: i64,
+        pub executions: i64,
+    }
+
+    impl DurationsForRunsRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("run_id", ::arrow::datatypes::DataType::Utf8),
+                ("stage", ::arrow::datatypes::DataType::Utf8),
+                ("statement", ::arrow::datatypes::DataType::Utf8),
+                ("total_ms", ::arrow::datatypes::DataType::Int64),
+                ("executions", ::arrow::datatypes::DataType::Int64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "run_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "stage")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "statement")?;
+                let c3: &::arrow::array::Int64Array = crate::batch::col(batch, 3, "total_ms")?;
+                let c4: &::arrow::array::Int64Array = crate::batch::col(batch, 4, "executions")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        run_id: crate::batch::req(crate::batch::opt_str(c0, i), "run_id", i)?,
+                        stage: crate::batch::req(crate::batch::opt_str(c1, i), "stage", i)?,
+                        statement: crate::batch::req(crate::batch::opt_str(c2, i), "statement", i)?,
+                        total_ms: crate::batch::req(crate::batch::opt_i64(c3, i), "total_ms", i)?,
+                        executions: crate::batch::req(
+                            crate::batch::opt_i64(c4, i),
+                            "executions",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Each statement's total duration and execution count per (run, stage), for the given runs (ids joined by chr(31)) at a pinned snapshot: what the cost roll-up shares an attempt's spend across (#1330).
+    pub fn durations_for_runs(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        run_ids: &str,
+    ) -> ::duckdb::Result<Vec<DurationsForRunsRow>> {
+        const SQL: &str = "SELECT run_id, stage, statement,
+       CAST(sum(duration_ms) AS BIGINT) AS total_ms,
+       CAST(count(*) AS BIGINT) AS executions
+FROM lake.main.statement_executions AT (VERSION => {snapshot})
+WHERE run_id IN (SELECT unnest(string_split($1, chr(31))))
+GROUP BY run_id, stage, statement
+ORDER BY run_id, stage, statement
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "statement_execution",
+            "read",
+            "durations_for_runs",
+            "statement_executions",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![run_ids]))?
+            .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        DurationsForRunsRow::from_batches(&batches)
+    }
+}
