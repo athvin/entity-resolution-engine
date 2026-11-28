@@ -288,7 +288,7 @@ async fn run_all_full_runs_as_eight_pods_and_reproduces_base_10() {
         assert!(
             times
                 .iter()
-                .all(|t| t.run_id == queued.id && t.executions > 0),
+                .all(|t| t.run_id == queued.id && t.executions.unwrap_or(0) > 0),
             "{times:?}"
         );
         pairs

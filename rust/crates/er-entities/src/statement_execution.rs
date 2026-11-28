@@ -155,8 +155,8 @@ pub mod read {
         pub run_id: String,
         pub stage: String,
         pub statement: String,
-        pub total_ms: i64,
-        pub executions: i64,
+        pub total_ms: Option<i64>,
+        pub executions: Option<i64>,
     }
 
     impl DurationsForRunsRow {
@@ -191,12 +191,8 @@ pub mod read {
                         run_id: crate::batch::req(crate::batch::opt_str(c0, i), "run_id", i)?,
                         stage: crate::batch::req(crate::batch::opt_str(c1, i), "stage", i)?,
                         statement: crate::batch::req(crate::batch::opt_str(c2, i), "statement", i)?,
-                        total_ms: crate::batch::req(crate::batch::opt_i64(c3, i), "total_ms", i)?,
-                        executions: crate::batch::req(
-                            crate::batch::opt_i64(c4, i),
-                            "executions",
-                            i,
-                        )?,
+                        total_ms: crate::batch::opt_i64(c3, i),
+                        executions: crate::batch::opt_i64(c4, i),
                     });
                 }
             }
@@ -212,7 +208,7 @@ pub mod read {
     ) -> ::duckdb::Result<Vec<DurationsForRunsRow>> {
         const SQL: &str = "SELECT run_id, stage, statement,
        CAST(sum(duration_ms) AS BIGINT) AS total_ms,
-       CAST(count(*) AS BIGINT) AS executions
+       count(*) AS executions
 FROM lake.main.statement_executions AT (VERSION => {snapshot})
 WHERE run_id IN (SELECT unnest(string_split($1, chr(31))))
 GROUP BY run_id, stage, statement

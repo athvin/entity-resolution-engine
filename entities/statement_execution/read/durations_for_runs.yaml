@@ -8,5 +8,5 @@ returns:
   - { name: run_id, type: varchar, nullable: false }
   - { name: stage, type: varchar, nullable: false }
   - { name: statement, type: varchar, nullable: false }
-  - { name: total_ms, type: bigint, nullable: false }
-  - { name: executions, type: bigint, nullable: false }
+  - { name: total_ms, type: bigint }
+  - { name: executions, type: bigint }

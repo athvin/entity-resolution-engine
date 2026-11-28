@@ -6616,8 +6616,8 @@ impl cost_roll::StatementSource for LakeStatementTimes {
                 run_id: r.run_id,
                 stage: r.stage,
                 statement: r.statement,
-                total_ms: r.total_ms,
-                executions: r.executions,
+                total_ms: r.total_ms.unwrap_or(0),
+                executions: r.executions.unwrap_or(0),
             })
             .collect())
     }
