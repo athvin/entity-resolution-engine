@@ -2,6 +2,7 @@
 //! keep their established views; this consumer also needs signatures and local
 //! response helpers, for which a Rust syntax tree avoids guessing across functions.
 
+pub mod errors;
 mod requests;
 mod responses;
 #[cfg(test)]
@@ -28,6 +29,9 @@ pub struct Operation {
     /// Component schemas of the success body, when every success `Json(…)`
     /// names a registered type; empty for an envelope-level operation.
     pub response_schemas: Vec<Value>,
+    /// What else the handler can answer (#1333): error statuses and the
+    /// headers it reads or sets, derived from its source.
+    pub surface: errors::Surface,
 }
 
 pub struct Request {
@@ -145,6 +149,7 @@ pub fn operations(
                 request,
                 responses,
                 response_schemas,
+                surface: errors::derive(&parsed, &handler),
             });
         }
     }

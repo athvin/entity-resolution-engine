@@ -70,6 +70,9 @@
               }
             }
           },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -116,6 +119,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -169,6 +187,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -239,6 +272,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -299,6 +350,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -419,6 +485,21 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -474,6 +555,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -585,6 +681,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -646,6 +763,21 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -704,6 +836,21 @@
                 "schema": {}
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -786,6 +933,30 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -842,6 +1013,21 @@
                 "schema": {}
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -925,6 +1111,30 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error502"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -980,6 +1190,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -1123,6 +1348,30 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -1183,6 +1432,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -1264,6 +1528,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -1368,6 +1647,27 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -1474,6 +1774,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -1534,6 +1855,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -1603,6 +1942,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -1674,6 +2031,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -1734,6 +2109,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -1814,6 +2204,21 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -1877,6 +2282,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -1955,6 +2375,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -2023,6 +2461,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -2093,6 +2546,30 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -2162,6 +2639,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -2348,6 +2843,30 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -2416,6 +2935,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -2514,6 +3048,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -2582,6 +3134,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -2682,6 +3249,30 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -2762,6 +3353,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -2845,6 +3451,30 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -2916,6 +3546,27 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -3039,6 +3690,30 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -3115,6 +3790,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -3216,6 +3909,30 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -3279,6 +3996,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -3375,6 +4107,27 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -3480,6 +4233,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -3511,6 +4285,16 @@
         "summary": "upload one source's delivery",
         "operationId": "post_orgs_by_org_datasets_by_ds_imports",
         "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Make the request safely retryable: the same key with the same payload returns the original receipt (with `Idempotent-Replayed: true`) and queues nothing; the same key with a different payload is a 409. Scoped to the dataset and source; at most 255 characters.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          },
           {
             "name": "org",
             "in": "path",
@@ -3568,6 +4352,14 @@
         "responses": {
           "2XX": {
             "description": "Successful response.",
+            "headers": {
+              "Idempotent-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`true` when this response replays the receipt of an earlier request with the same Idempotency-Key; absent on a first delivery."
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -3575,6 +4367,36 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "402": {
+            "$ref": "#/components/responses/Error402"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error413"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -3658,6 +4480,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -3728,6 +4568,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -3797,6 +4658,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -3876,6 +4755,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -3967,6 +4861,27 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -4035,6 +4950,18 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -4105,6 +5032,21 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -4174,6 +5116,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -4242,6 +5202,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -4353,6 +5328,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -4441,6 +5434,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -4528,6 +5542,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -4644,6 +5673,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -4732,6 +5779,21 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -4792,6 +5854,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -4903,6 +5983,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -4963,6 +6061,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -5055,6 +6168,27 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -5173,6 +6307,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -5242,6 +6397,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -5340,6 +6513,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -5437,6 +6631,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -5525,6 +6740,21 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -5585,6 +6815,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -5703,6 +6951,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -5763,6 +7032,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -5832,6 +7119,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -5931,6 +7233,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -6029,6 +7349,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -6096,6 +7434,21 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -6160,6 +7513,24 @@
                 "schema": {}
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -6294,6 +7665,30 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -6354,6 +7749,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -6420,6 +7833,21 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -6480,6 +7908,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -6593,6 +8039,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -6669,6 +8133,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -6752,6 +8231,27 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -6838,6 +8338,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -6927,6 +8445,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -6996,6 +8535,27 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -7067,6 +8627,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -7127,6 +8708,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -7227,6 +8826,30 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -7260,6 +8883,16 @@
         "summary": "push records as JSON",
         "operationId": "post_orgs_by_org_datasets_by_ds_records_ingest",
         "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Make the request safely retryable: the same key with the same payload returns the original receipt (with `Idempotent-Replayed: true`) and queues nothing; the same key with a different payload is a 409. Scoped to the dataset and source; at most 255 characters.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          },
           {
             "name": "org",
             "in": "path",
@@ -7314,6 +8947,14 @@
         "responses": {
           "2XX": {
             "description": "Successful response.",
+            "headers": {
+              "Idempotent-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`true` when this response replays the receipt of an earlier request with the same Idempotency-Key; absent on a first delivery."
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -7321,6 +8962,36 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "402": {
+            "$ref": "#/components/responses/Error402"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error413"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -7421,6 +9092,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -7519,6 +9211,27 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -7619,6 +9332,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -7707,6 +9441,30 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -7807,6 +9565,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -7905,6 +9684,27 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -8015,6 +9815,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -8124,6 +9945,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -8216,6 +10058,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -8280,6 +10143,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -8396,6 +10277,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -8500,6 +10402,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -8569,6 +10492,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -8637,6 +10578,27 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -8725,6 +10687,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -8788,6 +10771,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -8885,6 +10886,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -8951,6 +10973,21 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -9014,6 +11051,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -9104,6 +11156,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -9172,6 +11242,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -9258,6 +11343,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -9322,6 +11425,21 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -9382,6 +11500,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -9447,6 +11580,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -9517,6 +11668,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -9617,6 +11786,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -9703,6 +11890,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -9803,6 +12008,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -9889,6 +12112,36 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "402": {
+            "$ref": "#/components/responses/Error402"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -9955,6 +12208,30 @@
                 "schema": {}
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -10023,6 +12300,30 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -10084,6 +12385,14 @@
         "responses": {
           "2XX": {
             "description": "Successful response.",
+            "headers": {
+              "Idempotent-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`true` when this response replays the receipt of an earlier request with the same Idempotency-Key; absent on a first delivery."
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -10091,6 +12400,33 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -10180,6 +12516,33 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error413"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -10268,6 +12631,21 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -10328,6 +12706,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -10439,6 +12835,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -10499,6 +12913,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -10594,6 +13023,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -10654,6 +13101,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -10761,6 +13223,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -10821,6 +13301,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -10929,6 +13424,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -10999,6 +13512,24 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -11090,6 +13621,27 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -11151,6 +13703,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -11201,6 +13771,24 @@
                 "schema": {}
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -11257,6 +13845,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -11343,6 +13946,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -11420,6 +14041,24 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
             "content": {
@@ -11472,6 +14111,15 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -11533,6 +14181,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
           },
           "default": {
             "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
@@ -19164,6 +21827,242 @@
             "type": "string"
           },
           "writeback_allowlist": {}
+        }
+      }
+    },
+    "responses": {
+      "Error400": {
+        "description": "The request is malformed.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error401": {
+        "description": "No valid credential.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error402": {
+        "description": "The org's record allowance is used up.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error403": {
+        "description": "The credential's role is below what this operation needs.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error404": {
+        "description": "Not found — including another org's resource, which is never distinguished from a missing one.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error409": {
+        "description": "The request conflicts with the resource's current state.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error410": {
+        "description": "Gone.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error413": {
+        "description": "The body is larger than this operation accepts.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error422": {
+        "description": "The request is well-formed but invalid; `detail` says which field and why.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error500": {
+        "description": "Internal error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error501": {
+        "description": "Not available on this deployment (a store it needs is not configured).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error502": {
+        "description": "An upstream provider failed.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error503": {
+        "description": "Temporarily unavailable, or not configured on this deployment.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "detail"
+              ],
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         }
       }
     },
