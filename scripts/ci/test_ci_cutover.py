@@ -115,6 +115,16 @@ class CutoverTests(unittest.TestCase):
                          'color.blue.replicas=1', 'color.green.replicas=1']:
             self.assertIn(required, args)
 
+    def test_the_cutover_keeps_what_the_colour_deploy_enabled(self):
+        # The cutover is a full `--set` upgrade, not --reuse-values: a value the
+        # colour deploy set and this omits is reset to the chart default.
+        with patch.object(cutover, 'command', return_value='upgraded') as run:
+            cutover.Cutover({**self.env, 'COST_ROLL': 'true'}).upgrade('green')
+        self.assertIn('costRoll.enabled=true', run.call_args.args[0])
+        with patch.object(cutover, 'command', return_value='upgraded') as run:
+            self.gate.upgrade('green')
+        self.assertNotIn('costRoll.enabled=true', run.call_args.args[0])
+
     def test_prod_cannot_silently_skip_edge_verification(self):
         for key in ['TARGET_GROUP_ARN', 'PUBLIC_HEALTH_URL']:
             with self.subTest(key=key), self.assertRaises(ValueError):
