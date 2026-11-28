@@ -6541,7 +6541,86 @@ pub async fn cost_roll_main() -> Result<cost_roll::RollReport, String> {
         .map_err(|e| format!("counting records: {e}"))?;
     let cur = cost_aws::Athena::from_env().await;
     let sink = cost_aws::CloudWatch::from_env().await;
-    cost_roll::roll(&client, &cur, &records, &sink, chrono::Utc::now()).await
+    let statements = LakeStatementTimes::load(&client)
+        .await
+        .map_err(|e| format!("listing datasets: {e}"))?;
+    cost_roll::roll(
+        &client,
+        &cur,
+        &records,
+        &sink,
+        &statements,
+        chrono::Utc::now(),
+    )
+    .await
+}
+
+/// Statement times from each active dataset's own lake (#1330): the
+/// `statement_executions` rows its runs' lake-writing pod tasks recorded.
+struct LakeStatementTimes {
+    datasets: std::collections::BTreeMap<(String, String), pg::DatasetDetail>,
+}
+
+impl LakeStatementTimes {
+    async fn load(client: &tokio_postgres::Client) -> Result<Self, tokio_postgres::Error> {
+        let mut datasets = std::collections::BTreeMap::new();
+        for org in pg::list_orgs(client).await? {
+            if org.state != "active" {
+                continue;
+            }
+            for d in pg::list_datasets(client, &org.id).await? {
+                if d.state == "active" {
+                    datasets.insert((org.id.clone(), d.id.clone()), d);
+                }
+            }
+        }
+        Ok(Self { datasets })
+    }
+}
+
+impl cost_roll::StatementSource for LakeStatementTimes {
+    async fn durations(
+        &self,
+        org_id: &str,
+        dataset_id: &str,
+        run_ids: &[String],
+    ) -> Result<Vec<cost_roll::StatementTime>, String> {
+        let Some(d) = self
+            .datasets
+            .get(&(org_id.to_string(), dataset_id.to_string()))
+            .cloned()
+        else {
+            return Err(format!("dataset {dataset_id} is not active"));
+        };
+        let ids = run_ids.join("\u{1f}");
+        let read = with_dataset_lake(d, move |session, _| {
+            if !session
+                .lake_table_exists("statement_executions")
+                .map_err(|e| e.to_string())?
+            {
+                return Ok(Vec::new());
+            }
+            let snapshot = read::latest_snapshot(session)?;
+            er_entities::statement_execution::read::durations_for_runs(
+                session.connection(),
+                snapshot,
+                &ids,
+            )
+            .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|_| "lake unavailable".to_string())?;
+        Ok(read?
+            .into_iter()
+            .map(|r| cost_roll::StatementTime {
+                run_id: r.run_id,
+                stage: r.stage,
+                statement: r.statement,
+                total_ms: r.total_ms.unwrap_or(0),
+                executions: r.executions.unwrap_or(0),
+            })
+            .collect())
+    }
 }
 
 async fn with_dataset_lake<F, T>(

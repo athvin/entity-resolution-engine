@@ -452,7 +452,20 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             if sigterm.load(Ordering::SeqCst) {
                 cancel.cancel();
             }
-            let result = dags::run_pod_task(kind, &task_id, &mut ctx);
+            // A lake-writing task records its statement executions under its task
+            // id, which the cost roll-up shares the attempt's spend across
+            // (#1330). A read-only task records nothing: the drain is a write.
+            let writes_lake = dags::dag_for(kind)
+                .nodes
+                .iter()
+                .any(|n| n.task_id == task_id && n.writes_lake);
+            let result = if writes_lake {
+                er_cli::with_recorded_executions(&session, &order.run_id, &task_id, || {
+                    dags::run_pod_task(kind, &task_id, &mut ctx)
+                })
+            } else {
+                dags::run_pod_task(kind, &task_id, &mut ctx)
+            };
             Ok((result, session.latest_snapshot_version().ok()))
         })();
         match result {

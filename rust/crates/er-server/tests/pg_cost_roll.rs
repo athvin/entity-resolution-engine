@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use er_server::cost_roll::{self, CurSource, MetricSink, Scalars};
+use er_server::cost_roll::{self, CurSource, MetricSink, Scalars, StatementSource, StatementTime};
 use er_server::pg;
 
 use crate::common;
@@ -48,6 +48,32 @@ impl MetricSink for Sink {
     fn put(&self, s: &Scalars) -> impl std::future::Future<Output = Result<(), String>> + Send {
         self.0.lock().unwrap().push(s.clone());
         std::future::ready(Ok(()))
+    }
+}
+
+/// Every asked-for run spent half of its `match` stage in one statement and a
+/// sliver in another (#1330).
+struct FakeStatements;
+impl StatementSource for FakeStatements {
+    fn durations(
+        &self,
+        _org: &str,
+        _dataset: &str,
+        runs: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<StatementTime>, String>> + Send {
+        let mut out = Vec::new();
+        for run in runs {
+            for (statement, ms) in [("match_score.create.batch", 45_000), ("tiny.read.probe", 1)] {
+                out.push(StatementTime {
+                    run_id: run.clone(),
+                    stage: "match".into(),
+                    statement: statement.into(),
+                    total_ms: ms,
+                    executions: 3,
+                });
+            }
+        }
+        std::future::ready(Ok(out))
     }
 }
 
@@ -146,7 +172,7 @@ async fn runner_cost_is_attributed_by_instance_and_re_rolls_in_place() {
     ]);
     let sink = Sink::default();
 
-    let report = cost_roll::roll(&client, &cur, &records, &sink, now)
+    let report = cost_roll::roll(&client, &cur, &records, &sink, &FakeStatements, now)
         .await
         .unwrap();
     assert_eq!(report.periods, ["2026-10", "2026-11"]);
@@ -187,6 +213,34 @@ async fn runner_cost_is_attributed_by_instance_and_re_rolls_in_place() {
         .unwrap();
     assert!((october[0].usd_per_pod_hour - 0.2).abs() < 1e-9);
 
+    // Per-statement spend (#1330): every dataset with attempts this period is
+    // reported, its top statement named and priced, nothing under a cent priced
+    // alone, and coverage bounded.
+    assert!(!report.statements.is_empty(), "{report:?}");
+    for d in &report.statements {
+        assert_eq!(d.period, "2026-11");
+        assert!(d.coverage > 0.0 && d.coverage <= 1.0, "{d:?}");
+        assert!(d.attributed_usd <= d.spend_usd + 1e-9, "{d:?}");
+        assert!(
+            d.top.iter().all(|s| s.usd >= cost_roll::MIN_QUOTED_USD),
+            "{d:?}"
+        );
+        assert!(
+            d.top.iter().all(|s| s.statement != "tiny.read.probe"),
+            "a sub-cent statement is counted, not priced: {d:?}"
+        );
+    }
+    let acme_statements = report
+        .statements
+        .iter()
+        .find(|d| d.org_id == orgs[0].0)
+        .expect("acme's statements");
+    assert_eq!(acme_statements.top[0].statement, "match_score.create.batch");
+    assert!(
+        acme_statements.below_one_cent.statements >= 1,
+        "{acme_statements:?}"
+    );
+
     let scalars = sink.0.lock().unwrap().last().cloned().unwrap();
     assert!((scalars.cur_staleness_hours - 30.0).abs() < 1e-9);
     assert!(
@@ -210,7 +264,7 @@ async fn runner_cost_is_attributed_by_instance_and_re_rolls_in_place() {
         ]),
         latest: now - Duration::hours(2),
     };
-    let again = cost_roll::roll(&client, &cur, &records, &sink, now)
+    let again = cost_roll::roll(&client, &cur, &records, &sink, &FakeStatements, now)
         .await
         .unwrap();
     assert_eq!(again.billed_attempts, 5);

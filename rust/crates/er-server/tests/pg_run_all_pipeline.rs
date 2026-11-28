@@ -268,6 +268,29 @@ async fn run_all_full_runs_as_eight_pods_and_reproduces_base_10() {
             er_entities::run::read::by_id(session.connection(), &queued.id).expect("run");
         assert_eq!(run_rows.len(), 1, "exactly one run row for this job");
         assert_eq!(run_rows[0].model_version, Some("v0001".to_string()));
+        // Each lake-writing pod recorded its statements under its task id
+        // (#1330): the cost roll-up shares an attempt's spend across these.
+        let snapshot = session.latest_snapshot_version().expect("snapshot");
+        let times = er_entities::statement_execution::read::durations_for_runs(
+            session.connection(),
+            snapshot,
+            &queued.id,
+        )
+        .expect("statement times");
+        let stages: std::collections::BTreeSet<&str> =
+            times.iter().map(|t| t.stage.as_str()).collect();
+        for stage in ["ingest", "standardize", "match", "reconcile"] {
+            assert!(
+                stages.contains(stage),
+                "the {stage} pod recorded no statements: {stages:?}"
+            );
+        }
+        assert!(
+            times
+                .iter()
+                .all(|t| t.run_id == queued.id && t.executions.unwrap_or(0) > 0),
+            "{times:?}"
+        );
         pairs
     };
 

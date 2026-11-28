@@ -88,6 +88,7 @@ be grouped, filtered by target, or joined to a trace.
 - `er-obs/src/init.rs`
 - `er-obs/src/otlp.rs`
 - `er-obs/src/propagate.rs`
+- `er-server/src/cost_roll.rs`
 - `er-server/src/dags/control/mod.rs`
 - `er-server/src/dags/tasks.rs`
 - `er-server/src/dispatcher.rs`
