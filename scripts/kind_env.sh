@@ -20,7 +20,21 @@ CLUSTER=er-kind
 NS=er-kind
 REG_NAME=er-kind-registry
 REG_PORT=5001
-IMAGE_TAG=kind
+# Content-addressed, never a mutable tag (#815): a tag the node already holds
+# is not pulled again (the chart sets no imagePullPolicy, so it is
+# IfNotPresent), and `:kind` silently kept a five-day-old image while the probe
+# reported on it. The short HEAD, plus a hash of the diff when the tree is dirty.
+image_tag() {
+    local head dirty
+    head="$(git -C "$(dirname "${BASH_SOURCE[0]}")/.." rev-parse --short=12 HEAD)"
+    dirty="$(git -C "$(dirname "${BASH_SOURCE[0]}")/.." diff HEAD | shasum | cut -c1-8)"
+    if git -C "$(dirname "${BASH_SOURCE[0]}")/.." diff --quiet HEAD; then
+        echo "${head}"
+    else
+        echo "${head}-dirty-${dirty}"
+    fi
+}
+IMAGE_TAG="${ER_KIND_IMAGE_TAG:-$(image_tag)}"
 DATA_DIR="${ER_KIND_DATA_DIR:-/tmp/er-kind/srv}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CTX="kind-${CLUSTER}"
@@ -107,7 +121,18 @@ EOF
         --set "images.registry=localhost:${REG_PORT}" \
         --set "images.tag=${IMAGE_TAG}" \
         --atomic --wait --timeout 5m
-    log "up: er-platform installed in ${NS} (kubectl --context ${CTX} -n ${NS} get pods)"
+    # Verify by image ID, never by tag: every er-api pod must run the digest
+    # just pushed.
+    local want got
+    want="$(docker inspect --format '{{index .RepoDigests 0}}' "localhost:${REG_PORT}/er-api:${IMAGE_TAG}" | sed 's/.*@//')"
+    got="$(kubectl --context "${CTX}" -n "${NS}" get pods -l app.kubernetes.io/part-of=er \
+        -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.imageID}{"\n"}{end}{end}' \
+        | grep 'er-api' | sed 's/.*@//' | sort -u)"
+    if [ -n "${got}" ] && [ "${got}" != "${want}" ]; then
+        log "pods run ${got}, not the image just built (${want})"
+        exit 1
+    fi
+    log "up: er-platform installed in ${NS} from er-api:${IMAGE_TAG} (${want}) (kubectl --context ${CTX} -n ${NS} get pods)"
 }
 
 case "${1:-}" in

@@ -1141,6 +1141,16 @@ The kind phase and the dev-namespace one are not interchangeable, and it is wort
 
 **How local development runs jobs afterwards, decided (#638).** The blocker was never the flag: `ER_DISPATCH_IN_PROCESS` is **not assigned anywhere in the tree** — every occurrence is prose or a comment — and `scripts/frontend-dev/up.sh` already starts `er-dispatcher` as its own host process. Local dev therefore already runs this phase's topology. What the phase actually removes locally is the *executor's* only route to a `PodApi`: `executor::from_env` has three `return (None, None)` paths and the third needs `er_k8s::KubeApi::in_cluster`, so with no legacy arm a host dispatcher can claim a job and execute nothing. The only non-Kubernetes implementors are a test double (`er-server/tests/fake_pod_api.rs`) and the observer's `Scripted`, and promoting either is what §13 forbids.
 
+**kind runs the image it built, checked by image ID (#815).** `make kind-up` tags
+`er-api` by content (short HEAD, plus a diff hash when dirty) and refuses to
+report `up` unless every pod's `imageID` is the digest it pushed; `check_kind.sh`
+prints the running image IDs first. A mutable `:kind` tag kept a five-day-old
+image on a long-lived node. A long-lived cluster's control-plane Postgres drifts
+too (a 5-day-old store had `dataset_id` nullable where the catalog says NOT
+NULL, and the pre-upgrade hook rightly refused): drop and recreate the `er`
+database (`kubectl -n er-kind exec deploy/er-postgres -- psql -U er -c 'DROP
+DATABASE er WITH (FORCE)' postgres && … -c 'CREATE DATABASE er' postgres`).
+
 So: **anything needing real job execution points at kind** (`make kind-up`, `make check-kind`), and `make run` plus the host dev stack keep the API-only work they already do. A local or in-process executor is refused on §13's own words.
 
 The part worth stating precisely, because the obvious cheap complement does not hold: seeding the `jobs`/`runs` rows through the CLI — which `seed.mjs` already does for the corpus, "because the CLI is the only thing that can" — covers **four of the five** full-stack specs (`login-dashboard`, `see-your-data` and `fix-your-data` read rows; `run-the-business` asserts a *refusal*, 409 while suspended, and needs no executor at all). It cannot cover `grow-your-data`, which creates a source named at runtime, clicks `wizard-activate-run`, waits out `waitForQuietQueue(page, 780_000)` and asserts `["run_all_incremental", "run_all_full", "train"]` are all `succeeded`. There is no row to pre-seed for a source that does not exist until the spec makes it. That spec needs a cluster after this phase, and sizing that is its own ticket rather than a line item here — the engine-side handoff it exercises is already covered by the kind probe's pipeline phase as seven pods, so what is at stake is the UI journey, not the engine.
