@@ -60,6 +60,10 @@ allow = [
     "CC0-1.0",
     "CDLA-Permissive-2.0",
     "0BSD",
+    # minicbor, through aws-smithy-cbor (the CloudWatch SDK's CBOR protocol, #667).
+    # The npm allowlist (frontend/scripts/check-licenses.mjs) already carries it:
+    # OSI-approved, a plain-language MIT equivalent.
+    "BlueOak-1.0.0",
 ]
 confidence-threshold = 0.9
 

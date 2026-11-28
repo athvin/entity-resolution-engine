@@ -1,0 +1,18 @@
+kind: statement
+operation: read
+description: "Every finished pod attempt with a node, in a time window, across tenants — what the cost roll-up (#667) attributes instance cost to. An operator-side read: the roll-up runs as a deployment job, never on a tenant's request."
+params:
+  - { name: from_ts, type: timestamp }
+  - { name: to_ts, type: timestamp }
+returns:
+  - { name: id, type: varchar, nullable: false }
+  - { name: org_id, type: varchar, nullable: false }
+  - { name: dataset_id, type: varchar }
+  - { name: job_id, type: varchar, nullable: false }
+  - { name: task_id, type: varchar, nullable: false }
+  - { name: resource_class, type: varchar }
+  - { name: node_name, type: varchar }
+  - { name: state, type: varchar, nullable: false }
+  - { name: queued_at, type: timestamp }
+  - { name: started_at, type: timestamp }
+  - { name: finished_at, type: timestamp }

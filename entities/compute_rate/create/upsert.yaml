@@ -1,0 +1,13 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record a class's rate for a period; a re-roll (the CUR is revised for days) replaces it."
+params:
+  - { name: id, type: varchar }
+  - { name: resource_class, type: varchar }
+  - { name: billing_period, type: varchar }
+  - { name: usd_per_pod_hour, type: double }
+  - { name: attempt_hours, type: double }
+  - { name: billed_usd, type: double }
+  - { name: instances, type: bigint }
+returns: entity

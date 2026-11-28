@@ -124,6 +124,8 @@ jobs:
     env:
       CI_NAMESPACE: ci
       CLUSTER: er-dev
+      # The cost roll-up CronJob (#667); its IAM exists only for dev's `ci`.
+      COST_ROLL: "true"
       AWS_REGION: us-east-2
       # The commit being deployed. `workflow_run` does not check out anything
       # by default and `github.sha` here is the DEFAULT BRANCH tip, not the

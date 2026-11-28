@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "A period's rates, per class."
+params:
+  - { name: billing_period, type: varchar }
+returns: entity

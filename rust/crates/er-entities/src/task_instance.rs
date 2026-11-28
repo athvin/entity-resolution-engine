@@ -901,6 +901,69 @@ ORDER BY seq, try_number
             .collect())
     }
 
+    /// Every finished pod attempt with a node, in a time window, across tenants — what the cost roll-up (#667) attributes instance cost to. An operator-side read: the roll-up runs as a deployment job, never on a tenant's request.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize)]
+    pub struct FinishedPodsBetweenRow {
+        pub id: String,
+        pub org_id: String,
+        pub dataset_id: Option<String>,
+        pub job_id: String,
+        pub task_id: String,
+        pub resource_class: Option<String>,
+        pub node_name: Option<String>,
+        pub state: String,
+        pub queued_at: Option<::chrono::DateTime<::chrono::Utc>>,
+        pub started_at: Option<::chrono::DateTime<::chrono::Utc>>,
+        pub finished_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    }
+
+    pub async fn finished_pods_between(
+        client: &impl ::tokio_postgres::GenericClient,
+        from_ts: ::chrono::DateTime<::chrono::Utc>,
+        to_ts: ::chrono::DateTime<::chrono::Utc>,
+    ) -> ::std::result::Result<Vec<FinishedPodsBetweenRow>, ::tokio_postgres::Error> {
+        const SQL: &str =
+            "SELECT id, org_id, dataset_id, job_id, task_id, resource_class, node_name, state,
+       queued_at, started_at, finished_at
+FROM public.task_instances
+WHERE kind = 'pod' AND node_name IS NOT NULL AND started_at IS NOT NULL
+  AND finished_at IS NOT NULL
+  AND finished_at >= $1 AND finished_at < $2
+ORDER BY finished_at, id
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "read",
+            "finished_pods_between",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&from_ts, &to_ts])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
+        let decoded = rows
+            .iter()
+            .map(|row| {
+                Ok(FinishedPodsBetweenRow {
+                    id: row.try_get("id")?,
+                    org_id: row.try_get("org_id")?,
+                    dataset_id: row.try_get("dataset_id")?,
+                    job_id: row.try_get("job_id")?,
+                    task_id: row.try_get("task_id")?,
+                    resource_class: row.try_get("resource_class")?,
+                    node_name: row.try_get("node_name")?,
+                    state: row.try_get("state")?,
+                    queued_at: row.try_get("queued_at")?,
+                    started_at: row.try_get("started_at")?,
+                    finished_at: row.try_get("finished_at")?,
+                })
+            })
+            .collect();
+        ::er_span::check(&__span, decoded)
+    }
+
     /// Every live claimed pod row (the executor's working set): what adoption reconciles against the cluster listing at start-up and on every resync (§6.6), and what the stuck-pending sweep walks (§5.7).
     pub async fn live_claimed_pods(
         client: &impl ::tokio_postgres::GenericClient,

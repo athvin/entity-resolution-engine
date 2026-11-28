@@ -32,6 +32,8 @@
 
 pub mod api_check;
 pub mod config_check;
+pub mod cost_aws;
+pub mod cost_roll;
 pub mod cron;
 pub mod dags;
 pub mod delivery;
@@ -6488,6 +6490,60 @@ async fn set_allowance(
 /// Run the complete lake session lifecycle off the async executor. Only owned
 /// results cross back; opening, querying and dropping a session all happen in
 /// the bounded blocking closure. Authorization and dataset lookup precede this.
+/// Connected records per (org id, dataset id), counted in each active
+/// dataset's lake — the denominator of the cost roll-up's disproportion and
+/// cost-per-million scalars (#667). A lake that cannot be opened counts as
+/// unknown (absent), never zero.
+///
+/// # Errors
+/// Listing orgs or datasets failing.
+pub async fn lake_record_counts(
+    client: &tokio_postgres::Client,
+) -> Result<std::collections::BTreeMap<(String, String), i64>, tokio_postgres::Error> {
+    let mut out = std::collections::BTreeMap::new();
+    for org in pg::list_orgs(client).await? {
+        if org.state != "active" {
+            continue;
+        }
+        for d in pg::list_datasets(client, &org.id).await? {
+            if d.state != "active" {
+                continue;
+            }
+            let key = (org.id.clone(), d.id.clone());
+            let account = d.entity_type == "account";
+            if let Ok(Ok((_, n))) = with_dataset_lake(d, move |session, _| {
+                read::connected_records(session, account)
+            })
+            .await
+            {
+                out.insert(key, n);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// `er-server cost-roll`: attribute the current and previous period's runner
+/// cost from the CUR, store it, and emit the alarm scalars (#667).
+///
+/// # Errors
+/// Any step failing, as text; the CronJob's failure is the signal.
+pub async fn cost_roll_main() -> Result<cost_roll::RollReport, String> {
+    let dsn = std::env::var("ER_PG_DSN").map_err(|_| "ER_PG_DSN is not set".to_string())?;
+    let mut client = pg::connect(&dsn)
+        .await
+        .map_err(|e| format!("connecting: {}", errfmt::chain(&e)))?;
+    pg::ensure_schema(&mut client)
+        .await
+        .map_err(|e| format!("schema: {}", errfmt::chain(&e)))?;
+    let records = lake_record_counts(&client)
+        .await
+        .map_err(|e| format!("counting records: {e}"))?;
+    let cur = cost_aws::Athena::from_env().await;
+    let sink = cost_aws::CloudWatch::from_env().await;
+    cost_roll::roll(&client, &cur, &records, &sink, chrono::Utc::now()).await
+}
+
 async fn with_dataset_lake<F, T>(
     dataset: pg::DatasetDetail,
     read: F,

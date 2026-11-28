@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**71 entities, 354 declared statements.**
+**73 entities, 359 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -42,6 +42,7 @@ through a typed query function.
 | `audit_log` | `audit_log` | postgres | `id` | — | — |
 | `candidate_key` | `candidate_keys` | duckdb | `id` | `profile_run_id, key_columns` | — |
 | `column_profile` | `column_profiles` | duckdb | `id` | `profile_run_id, column_name` | — |
+| `compute_rate` | `compute_rates` | postgres | `id` | `resource_class, billing_period` | — |
 | `config_version` | `config_versions` | postgres | `id` | `dataset_id, version` | yes |
 | `dataset` | `datasets` | postgres | `id` | `org_id, name` | yes |
 | `ddl_log` | `ddl_log` | postgres | `id` | — | — |
@@ -83,6 +84,7 @@ through a typed query function.
 | `resolved_entity` | `entities` | duckdb | `id` | — | — |
 | `review` | `review_queue` | duckdb | `id` | `rec_a_key, rec_b_key, reason` | — |
 | `run` | `runs` | duckdb | `id` | — | — |
+| `run_cost` | `run_costs` | postgres | `id` | `task_instance_id` | — |
 | `run_stage` | `run_stages` | duckdb | `id` | `run_id, stage, try_number` | — |
 | `s3_ingest_cursor` | `s3_ingest_cursors` | postgres | `id` | `dataset_id, source` | — |
 | `salesforce_connection` | `salesforce_connections` | postgres | `id` | `org_id, name` | — |
@@ -118,6 +120,7 @@ Declared statements per entity and operation:
 | `audit_log` | 1 | 1 | 0 | 1 |
 | `candidate_key` | 1 | 1 | 0 | 0 |
 | `column_profile` | 1 | 2 | 0 | 0 |
+| `compute_rate` | 1 | 1 | 0 | 0 |
 | `config_version` | 1 | 2 | 1 | 0 |
 | `dataset` | 1 | 3 | 4 | 0 |
 | `ddl_log` | 0 | 1 | 0 | 0 |
@@ -159,6 +162,7 @@ Declared statements per entity and operation:
 | `resolved_entity` | 0 | 2 | 1 | 0 |
 | `review` | 0 | 5 | 3 | 0 |
 | `run` | 1 | 5 | 2 | 1 |
+| `run_cost` | 1 | 1 | 0 | 0 |
 | `run_stage` | 1 | 1 | 1 | 0 |
 | `s3_ingest_cursor` | 1 | 1 | 0 | 0 |
 | `salesforce_connection` | 1 | 2 | 1 | 0 |
@@ -172,7 +176,7 @@ Declared statements per entity and operation:
 | `staged_steward_action` | 1 | 1 | 1 | 0 |
 | `tag` | 1 | 3 | 1 | 0 |
 | `tagging` | 1 | 2 | 0 | 1 |
-| `task_instance` | 3 | 5 | 22 | 0 |
+| `task_instance` | 3 | 6 | 22 | 0 |
 | `tenant_schema_state` | 2 | 1 | 0 | 0 |
 | `upsert_apply` | 1 | 2 | 2 | 0 |
 | `upsert_policy` | 1 | 1 | 0 | 0 |

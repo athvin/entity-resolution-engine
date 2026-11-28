@@ -44,6 +44,17 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    compute_rates {
+        varchar id PK
+        varchar resource_class "in {L, M, S}"
+        varchar billing_period
+        double usd_per_pod_hour
+        double attempt_hours
+        double billed_usd
+        bigint instances
+        timestamp created_at
+        timestamp updated_at
+    }
     config_versions {
         varchar id PK
         varchar org_id FK
@@ -349,6 +360,25 @@ erDiagram
         varchar commit_request_id
         varchar phase "in {active, committed, committing, not_executed, opening, rolled_back, unknown}"
         timestamp released_at
+        timestamp created_at
+        timestamp updated_at
+    }
+    run_costs {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id
+        varchar job_id
+        varchar task_instance_id UK
+        varchar task_id
+        varchar resource_class
+        varchar node_name
+        varchar attempt_state
+        varchar billing_period
+        double wait_seconds
+        double run_seconds
+        double allocated_usd
+        double billed_usd
+        timestamp billed_as_of
         timestamp created_at
         timestamp updated_at
     }
@@ -693,6 +723,7 @@ erDiagram
     remote_attempts }o--|| datasets : "dataset_id → id"
     remote_attempts }o--|| jobs : "job_id → id"
     remote_attempts }o--|| task_instances : "task_instance_id → id"
+    run_costs }o--|| orgs : "org_id → id"
     s3_ingest_cursors }o--|| orgs : "org_id → id"
     s3_ingest_cursors }o--|| datasets : "dataset_id → id"
     salesforce_connections }o--|| orgs : "org_id → id"
@@ -742,6 +773,7 @@ erDiagram
 | --- | --- |
 | `api_keys` | An org-scoped API key: its role and the at-rest hash of the secret. |
 | `audit_log` | The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). Append-only constrains writes, not lifetime: rows past the deployment retention window (ER_AUDIT_RETENTION_DAYS, floor 400 days per the infra D-RETENTION decision) are retired by the dispatcher's retention sweep through delete/purge_expired. |
+| `compute_rates` | The self-calibrated price of one runner pod-hour per (resource class, billing period) (#667): the CUR's billed cost of every instance that hosted a runner attempt — usage, spot and the EKS Auto Mode fee — divided by the attempt-hours those instances hosted. Self-calibrated rather than read from the Pricing API, so it folds the family mix, the spot/on-demand mix and the Auto Mode fee in, and converges rather than drifts. Not tenant-scoped: it is the platform's own price. |
 | `config_versions` | A versioned config document for a tenant: its YAML, hash and publish state. |
 | `datasets` | One of a tenant's resolution domains: its own lake location, config pointer, entity type and lifecycle state. The lake env points at a DuckLake catalog of its own (a METADATA_SCHEMA inside the org's metadata database, or a file catalog locally), so two datasets never share tables. |
 | `ddl_log` | The DDL ledger: one row per DDL command executed against the control database, captured by the er_ddl_audit event triggers (migrations, operator DDL — boot replays are suppressed). |
@@ -762,6 +794,7 @@ erDiagram
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |
 | `pair_labels` | A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another. |
 | `remote_attempts` | Write-ahead remote execution identity and dataset fence; unresolved attempts survive task termination and dispatcher restarts. No SQL, parameters, profiles or credentials are stored. |
+| `run_costs` | What one runner attempt cost (#667). allocated_usd is (wait + run) hours × the class's rate — available as soon as the attempt finishes; billed_usd is the attempt's share of its instance's CUR cost, which arrives 24–48h late and is revised, hence billed_as_of. Wait is part of the cost: a node was provisioned for that attempt. An entity rather than a view because task_instances.live goes NULL on archive, and the retried attempts are exactly what the failure-spend share needs. |
 | `s3_ingest_cursors` | What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second. |
 | `salesforce_connections` | A tenant's Salesforce org credential: the instance URL and the OAuth client-credentials pair the extract job authenticates with. Org-scoped — one connection is one Salesforce org (connectors.md §4.1), and a credential is a tenant-level fact that several datasets may extract through. Deliberately NOT history: true — the history trigger copies whole rows as jsonb into an append-only companion, which would duplicate the client secret into a table nothing ever deletes from. |
 | `salesforce_delegated_grants` | A Salesforce user's delegated consent for writeback through one connection (#994): the refresh token, and the provider org and user it is bound to. Writeback acts as this user, never as the extraction's client credentials. Revoked when Salesforce refuses the refresh (consent withdrawn) or on request; a revoked grant authorizes nothing. |

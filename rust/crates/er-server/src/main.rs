@@ -95,6 +95,11 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     match args.get(1).map(String::as_str) {
         Some("migrate") => return migrate(&args[2..]).await,
         Some("migrate-tenants") => return migrate_tenants(&args[2..]).await,
+        Some("cost-roll") => {
+            let report = er_server::cost_roll_main().await?;
+            println!("{}", serde_json::to_string(&report)?);
+            return Ok(());
+        }
         Some("install-extensions") => return install_extensions(&args[2..]),
         _ => {}
     }

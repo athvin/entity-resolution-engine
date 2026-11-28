@@ -148,6 +148,8 @@ tempfile = "3"
 tokio-util = { version = "0.7.20", features = ["io"] }
 parquet = { version = "=60.2.0", default-features = false, features = ["arrow", "snap"] }
 futures-util = "0.3"
+aws-sdk-athena = { version = "1.133.0", default-features = false, features = ["rt-tokio", "behavior-version-latest"] }
+aws-sdk-cloudwatch = { version = "1.145.0", default-features = false, features = ["rt-tokio", "behavior-version-latest"] }
 
 [lints]
 workspace = true

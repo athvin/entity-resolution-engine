@@ -111,6 +111,20 @@ CREATE OR REPLACE TRIGGER er_history_api_keys
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS audit_log_at ON public.audit_log (at);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.compute_rates (
+  id text NOT NULL,
+  resource_class text NOT NULL CHECK (resource_class IN ('S', 'M', 'L')),
+  billing_period text NOT NULL,
+  usd_per_pod_hour double precision NOT NULL,
+  attempt_hours double precision NOT NULL,
+  billed_usd double precision NOT NULL,
+  instances bigint NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id),
+  UNIQUE (resource_class, billing_period)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS compute_rates_class_period ON public.compute_rates (resource_class, billing_period);"#,
     r#"CREATE TABLE IF NOT EXISTS public.datasets (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
@@ -625,6 +639,29 @@ CREATE INDEX IF NOT EXISTS task_instances_dataset ON public.task_instances (data
 CREATE UNIQUE INDEX IF NOT EXISTS remote_attempts_dataset_unresolved ON public.remote_attempts (dataset_id) WHERE released_at IS NULL;
 CREATE INDEX IF NOT EXISTS remote_attempts_org ON public.remote_attempts (org_id);
 CREATE INDEX IF NOT EXISTS remote_attempts_dataset_history ON public.remote_attempts (dataset_id, created_at);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.run_costs (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text,
+  job_id text NOT NULL,
+  task_instance_id text NOT NULL,
+  task_id text NOT NULL,
+  resource_class text,
+  node_name text NOT NULL,
+  attempt_state text NOT NULL,
+  billing_period text NOT NULL,
+  wait_seconds double precision NOT NULL,
+  run_seconds double precision NOT NULL,
+  allocated_usd double precision NOT NULL,
+  billed_usd double precision,
+  billed_as_of timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id),
+  UNIQUE (task_instance_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS run_costs_attempt ON public.run_costs (task_instance_id);
+CREATE INDEX IF NOT EXISTS run_costs_org_period ON public.run_costs (org_id, billing_period, dataset_id);"#,
     r#"CREATE TABLE IF NOT EXISTS public.s3_ingest_cursors (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),

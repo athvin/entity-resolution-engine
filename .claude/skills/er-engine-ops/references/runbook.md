@@ -384,3 +384,38 @@ any resource; and `Project` is `entity-resolution`, not the `er` that §16.1's
 prose claims. Activation itself is a Billing console action — check whether
 `aws_ce_cost_allocation_tag` can manage the AWS-generated `aws:eks:*` keys
 before putting it on a path that applies unattended on `main`.
+
+## The cost roll-up (as built, #667)
+
+`er-server cost-roll` (the `er-cost-roll` CronJob, daily at 07:17 UTC, dev `ci`
+only — `costRoll.enabled`, set by the dev deploy) attributes runner spend
+without split cost allocation, which the account still does not produce (0 of
+149,479 November rows, probed 2026-11-27).
+
+**The join is by instance, not by pod.** EKS Auto Mode names a node by its EC2
+instance id (`kubectl get nodes` shows `i-…`), `task_instances.node_name`
+records it, and the CUR keys every instance line — `BoxUsage`, `SpotUsage` and
+the `EKS-Auto:*-management-hours` fee — by the same id in
+`line_item_resource_id`. A runner pod holds its node alone, so the instance's
+whole cost belongs to the attempts it hosted, split by wait + run time. Split
+data would only refine a pod's share of a *shared* node.
+
+| Row | What it holds |
+|---|---|
+| `run_costs` (one per attempt) | `wait_seconds`, `run_seconds`; `allocated_usd` = hours × the class rate; `billed_usd` = the attempt's share of its instance's CUR cost, NULL until the CUR covers it; `billed_as_of` |
+| `compute_rates` (per class × `YYYY-MM`) | `usd_per_pod_hour` = billed ÷ attempt-hours over billed attempts; `instances` it was calibrated over |
+
+Each run re-rolls the current and previous period (the CUR is revised for
+days), in place. The previous period's rate prices the current period's
+attempts until the CUR covers them.
+
+Five scalars go to CloudWatch `ER/Cost` (dimension `Environment` only — never a
+tenant), alarmed in `infra/terraform/envs/dev/cost-roll.tf`:
+`MaxTenantSpendShare` > 0.5, `MaxTenantDisproportion` ≥ 3 on 2 of 3 days,
+`FailedRunSpendShare` > 0.2, `MaxCostPerMillionMoMChange` > 0.5 on two
+consecutive rolls, `CurStalenessHours` > 48. The tenant behind a firing alarm
+is in the CronJob's printed report.
+
+Not built yet: the per-statement share of an attempt's spend (#1330 — it will
+publish `coverage`, statement time ÷ wall time, and never quote a figure below
+$0.01) and the prod roll-up (#1331).
