@@ -73,6 +73,13 @@ class Cutover:
             args += ['-f', e['PLATFORM_VALUES']]
         if self.group:
             values['edge.targetGroupArn'] = self.group
+        # Every value deploy-inactive-colour.sh sets must be set again here:
+        # this upgrade is not --reuse-values, so a value it omits is reset to
+        # the chart default. The cost roll-up CronJob (#667) was created by the
+        # colour deploy and deleted by this upgrade 44s later.
+        if e.get('COST_ROLL') == 'true':
+            values['costRoll.enabled'] = 'true'
+
         for key, value in values.items():
             args += ['--set', f'{key}={value}']
         print(command(args), flush=True)
