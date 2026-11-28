@@ -12,6 +12,13 @@
 # `developer: app` (the namespace) this resolves to er/prod/app/{erserver,erweb}.
 environment: prod
 
+# The daily cost roll-up (#667, #1331). Its IAM is envs/prod/cost-roll.tf on the
+# prod er-api Pod Identity role; its alarms watch ER/Cost with Environment=prod.
+# Set here rather than with --set so the cutover's full upgrade keeps it too.
+costRoll:
+  enabled: true
+  environment: prod
+
 erserver:
   lake:
     # s3://er-prod-lake-797781631727/prod/app/ — the prod half of §7.3's

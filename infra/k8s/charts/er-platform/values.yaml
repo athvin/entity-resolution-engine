@@ -85,8 +85,9 @@ erserver:
 
 # #667: `er-server cost-roll` daily — runner cost attributed from the CUR by
 # instance id, stored in run_costs/compute_rates, five scalars to the ER/Cost
-# CloudWatch namespace. Off by default: it needs the er-api role's cost policy
-# (infra/terraform/envs/dev/cost-roll.tf), which exists only for dev `ci`.
+# CloudWatch namespace. Off by default: it needs the er-api role's cost policy,
+# which exists for dev `ci` (envs/dev/cost-roll.tf, enabled by COST_ROLL in the
+# deploy) and prod (envs/prod/cost-roll.tf, enabled in values-prod.yaml).
 costRoll:
   enabled: false
   # After the CUR's overnight refresh (it lands 24–48h late and is revised).
