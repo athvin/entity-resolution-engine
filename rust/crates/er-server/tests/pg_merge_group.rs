@@ -299,16 +299,29 @@ async fn stages_star_protect_and_record_keyed_pins(dsn: &str) {
     assert_eq!(email.as_deref(), Some("chosen@merge.test"));
     assert_eq!(city, None, "the cleared field is null");
 
-    // The master pin landed as an active protect overlay on crm:C001. This is
-    // asserted at the lake rather than through merge-plans' election because
-    // the merge-plans read path cannot see THIS entity: its `affected` CTE
-    // keys on the entity_id an event names, an assertion merge records
-    // `merged` only on the ABSORBED ids (the survivor is reachable solely
-    // through `merged_into`, which nothing follows), and with every record
-    // already clustered the survivor earns no `member_added` — a pre-existing
-    // read-path gap (#838), not this bundle's doing. The overlay → election half is
-    // covered by pg_protect_master's organic merge (a bridging record earns
-    // the survivor its `member_added`).
+    // The master pin landed as an active protect overlay on crm:C001, and
+    // the merge-plans read elects it for the SURVIVOR — the entity reconcile
+    // kept. Until #838 that entity was invisible there: an assertion merge
+    // records `merged` only on the absorbed ids and, every record being
+    // clustered already, earns the survivor no `member_added`; `affected` now
+    // follows `details.merged_into`.
+    let resp = app
+        .clone()
+        .oneshot(op(
+            "GET",
+            "/v1/orgs/acme/datasets/default/merge-plans",
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    let plans = json_body(resp).await;
+    let plan = plans["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["entity_id"].as_str() == Some(entity_id.as_str()))
+        .unwrap_or_else(|| panic!("the survivor has a plan: {plans}"));
+    assert_eq!(plan["master_key"], "crm:C001", "{plan}");
     let session = er_cli::open_lake(
         &tmp.join("catalog.ducklake").to_string_lossy(),
         &tmp.join("data").to_string_lossy(),

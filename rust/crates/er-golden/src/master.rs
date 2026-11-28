@@ -221,9 +221,26 @@ pub fn merge_plans_sql(
         format!("masters AS ( {masters_sql} )")
     };
     Ok(format!(
+        // The entities whose plan a run could have changed (#838). A `merged`
+        // event is recorded on the ABSORBED entity, which then has no members,
+        // so the survivor is the one its `details.merged_into` names; a
+        // `split` is recorded on the receiver, with the donor in
+        // `details.split_from`. Following both is what makes the survivor of a
+        // steward or assertion merge — whose members were all clustered
+        // already, so it earns no `member_added` — appear at all.
         "WITH affected AS ( \
-           SELECT DISTINCT entity_id FROM {schema_qualifier}.entity_events \
-           WHERE event_type IN ('merged', 'member_added') {since_filter}\
+           SELECT DISTINCT entity_id FROM ( \
+             SELECT entity_id FROM {schema_qualifier}.entity_events \
+             WHERE event_type IN ('merged', 'member_added', 'split') {since_filter}\
+             UNION ALL \
+             SELECT json_extract_string(details, '$.merged_into') AS entity_id \
+             FROM {schema_qualifier}.entity_events \
+             WHERE event_type = 'merged' {since_filter}\
+             UNION ALL \
+             SELECT json_extract_string(details, '$.split_from') AS entity_id \
+             FROM {schema_qualifier}.entity_events \
+             WHERE event_type = 'split' {since_filter}\
+           ) e WHERE entity_id IS NOT NULL \
          ), \
          {masters_cte}, \
          plan_groups AS ( \
